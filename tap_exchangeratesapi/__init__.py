@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
 
-import json
 import sys
-import argparse
 import time
+from email import utils
+
 import requests
 import singer
 import backoff
 import copy
 
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
-base_url = 'https://api.exchangeratesapi.io/'
+base_url = "https://api.apilayer.com/exchangerates_data/{date}?symbols={symbols}&base={base}"
 
 logger = singer.get_logger()
 session = requests.Session()
 
-DATE_FORMAT='%Y-%m-%d'
+DATE_FORMAT = '%Y-%m-%d'
+
+REQUIRED_CONFIG_KEYS = [
+    "apikey",
+    "base",
+    "symbols",
+    "start_date",
+    "schemaless"
+]
+
 
 def parse_response(r):
     flattened = r['rates']
@@ -24,10 +33,12 @@ def parse_response(r):
     flattened['date'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.strptime(r['date'], DATE_FORMAT))
     return flattened
 
+
 schema = {'type': 'object',
           'properties':
           {'date': {'type': 'string',
                     'format': 'date-time'}}}
+
 
 def giveup(error):
     logger.error(error.response.text)
@@ -35,18 +46,24 @@ def giveup(error):
     return not (response.status_code == 429 or
                 response.status_code >= 500)
 
+
 @backoff.on_exception(backoff.constant,
                       (requests.exceptions.RequestException),
                       jitter=backoff.random_jitter,
                       max_tries=5,
                       giveup=giveup,
                       interval=30)
-def request(url, params):
-    response = requests.get(url=url, params=params)
+def request(url, params, headers):
+    response = requests.get(url=url, params=params, headers=headers)
     response.raise_for_status()
     return response
-    
-def do_sync(base, start_date):
+
+
+def do_sync(config, start_date):
+    base = config["base"]
+    symbols = config["symbols"]
+    schemaless = config["schemaless"]
+
     state = {'start_date': start_date}
     next_date = start_date
     prev_schema = {}
@@ -57,20 +74,26 @@ def do_sync(base, start_date):
                         next_date,
                         base)
 
-            response = request(base_url + next_date, {'base': base})
-            payload = response.json()
+            response = request(base_url.format(date=next_date),
+                               {"base": base, "symbols": symbols},
+                               {"apikey": "AalpFzF64zL4AA97JuYZFJsktrGwvanV"})
 
-            # Update schema if new currency/currencies exist
-            for rate in payload['rates']:
-                if rate not in schema['properties']:
-                    schema['properties'][rate] = {'type': ['null', 'number']}
+            if schemaless:
+                singer.write_records('exchange_rate', response.text)
+            else:
+                payload = response.json()
 
-            # Only write schema if it has changed
-            if schema != prev_schema:
-                singer.write_schema('exchange_rate', schema, 'date')
+                # Update schema if new currency/currencies exist
+                for rate in payload['rates']:
+                    if rate not in schema['properties']:
+                        schema['properties'][rate] = {'type': ['null', 'number']}
 
-            if payload['date'] == next_date:
-                singer.write_records('exchange_rate', [parse_response(payload)])
+                # Only write schema if it has changed
+                if schema != prev_schema:
+                    singer.write_schema('exchange_rate', schema, 'date')
+
+                if payload['date'] == next_date:
+                    singer.write_records('exchange_rate', [parse_response(payload)])
 
             state = {'start_date': next_date}
             next_date = (datetime.strptime(next_date, DATE_FORMAT) + timedelta(days=1)).strftime(DATE_FORMAT)
@@ -88,32 +111,23 @@ def do_sync(base, start_date):
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    args = utils.parse_args(REQUIRED_CONFIG_KEYS)
+    state = {}
 
-    parser.add_argument(
-        '-c', '--config', help='Config file', required=False)
-    parser.add_argument(
-        '-s', '--state', help='State file', required=False)
-
-    args = parser.parse_args()
-
-    if args.config:
-        with open(args.config) as file:
-            config = json.load(file)
-    else:
-        config = {}
-
+    logger.info(f"Sync Starting with google-ads api {args.config['version']} version.")
     if args.state:
-        with open(args.state) as file:
-            state = json.load(file)
+        state.update(args.state)
     else:
-        state = {}
+        start_date = state.get('start_date') or args.config['start_date']
+        start_date = singer.utils.strptime_with_tz(start_date).date().strftime(DATE_FORMAT)
 
-    start_date = state.get('start_date') or config.get('start_date') or datetime.utcnow().strftime(DATE_FORMAT)
-    start_date = singer.utils.strptime_with_tz(start_date).date().strftime(DATE_FORMAT)
-
-    do_sync(config.get('base', 'USD'), start_date)
+        do_sync(args.config, start_date)
+        logger.info("Sync Completed")
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as exc:
+        logger.critical(exc)
+        raise exc

@@ -92,3 +92,5 @@ ENV/
 env.sh
 
 *~
+
+.idea
