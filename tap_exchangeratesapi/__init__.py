@@ -2,7 +2,7 @@
 
 import sys
 import time
-from email import utils
+from singer import utils
 
 import requests
 import singer
@@ -11,7 +11,7 @@ import copy
 
 from datetime import datetime, timedelta
 
-base_url = "https://api.apilayer.com/exchangerates_data/{date}?symbols={symbols}&base={base}"
+base_url = "https://api.apilayer.com/exchangerates_data/{date}"
 
 logger = singer.get_logger()
 session = requests.Session()
@@ -34,10 +34,17 @@ def parse_response(r):
     return flattened
 
 
-schema = {'type': 'object',
-          'properties':
-          {'date': {'type': 'string',
-                    'format': 'date-time'}}}
+schema = {
+    'type': 'object',
+    'properties':
+        {
+            'date':
+                {
+                    'type': 'string',
+                    'format': 'date-time'
+                }
+        }
+}
 
 
 def giveup(error):
@@ -67,7 +74,7 @@ def do_sync(config, start_date):
     state = {'start_date': start_date}
     next_date = start_date
     prev_schema = {}
-    
+
     try:
         while datetime.strptime(next_date, DATE_FORMAT) <= datetime.utcnow():
             logger.info('Replicating exchange rate data from %s using base %s',
@@ -78,21 +85,22 @@ def do_sync(config, start_date):
                                {"base": base, "symbols": symbols},
                                {"apikey": "AalpFzF64zL4AA97JuYZFJsktrGwvanV"})
 
-            if schemaless:
-                singer.write_records('exchange_rate', response.text)
-            else:
-                payload = response.json()
+            payload = response.json()
 
-                # Update schema if new currency/currencies exist
-                for rate in payload['rates']:
-                    if rate not in schema['properties']:
-                        schema['properties'][rate] = {'type': ['null', 'number']}
+            # Update schema if new currency/currencies exist
+            for rate in payload['rates']:
+                if rate not in schema['properties']:
+                    schema['properties'][rate] = {'type': ['null', 'number']}
 
-                # Only write schema if it has changed
-                if schema != prev_schema:
-                    singer.write_schema('exchange_rate', schema, 'date')
+            # Only write schema if it has changed
+            if schema != prev_schema:
+                singer.write_schema('exchange_rate', schema, 'date')
 
-                if payload['date'] == next_date:
+            if payload['date'] == next_date:
+                logger.info(f"schemaless : {schemaless}")
+                if schemaless:
+                    singer.write_records('exchange_rate', [payload])
+                else:
                     singer.write_records('exchange_rate', [parse_response(payload)])
 
             state = {'start_date': next_date}
@@ -114,7 +122,7 @@ def main():
     args = utils.parse_args(REQUIRED_CONFIG_KEYS)
     state = {}
 
-    logger.info(f"Sync Starting with google-ads api {args.config['version']} version.")
+    logger.info(f"Sync Starting with exchange rates api.")
     if args.state:
         state.update(args.state)
     else:
