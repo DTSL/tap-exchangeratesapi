@@ -20,8 +20,7 @@ DATE_FORMAT = '%Y-%m-%d'
 
 REQUIRED_CONFIG_KEYS = [
     "apikey",
-    "base",
-    "symbols",
+    "exchanges",
     "start_date",
     "schemaless"
 ]
@@ -67,8 +66,7 @@ def request(url, params, headers):
 
 
 def do_sync(config, start_date):
-    base = config["base"]
-    symbols = config["symbols"]
+    exchanges = config["exchanges"]
     schemaless = config["schemaless"]
 
     state = {'start_date': start_date}
@@ -77,31 +75,34 @@ def do_sync(config, start_date):
 
     try:
         while datetime.strptime(next_date, DATE_FORMAT) <= datetime.utcnow():
-            logger.info('Replicating exchange rate data from %s using base %s',
-                        next_date,
-                        base)
+            for exchange in exchanges:
+                base = exchange["base"]
+                symbols = exchange["symbols"]
+                logger.info('Replicating exchange rate data from %s using base %s',
+                            next_date,
+                            base)
 
-            response = request(base_url.format(date=next_date),
-                               {"base": base, "symbols": symbols},
-                               {"apikey": "AalpFzF64zL4AA97JuYZFJsktrGwvanV"})
+                response = request(base_url.format(date=next_date),
+                                   {"base": base, "symbols": symbols},
+                                   {"apikey": config["apikey"]})
 
-            payload = response.json()
+                payload = response.json()
 
-            # Update schema if new currency/currencies exist
-            for rate in payload['rates']:
-                if rate not in schema['properties']:
-                    schema['properties'][rate] = {'type': ['null', 'number']}
+                # Update schema if new currency/currencies exist
+                for rate in payload['rates']:
+                    if rate not in schema['properties']:
+                        schema['properties'][rate] = {'type': ['null', 'number']}
 
-            # Only write schema if it has changed
-            if schema != prev_schema:
-                singer.write_schema('exchange_rate', schema, 'date')
+                # Only write schema if it has changed
+                if schema != prev_schema:
+                    singer.write_schema('exchange_rate', schema, 'date')
 
-            if payload['date'] == next_date:
-                logger.info(f"schemaless : {schemaless}")
-                if schemaless:
-                    singer.write_records('exchange_rate', [payload])
-                else:
-                    singer.write_records('exchange_rate', [parse_response(payload)])
+                if payload['date'] == next_date:
+                    logger.info(f"schemaless : {schemaless}")
+                    if schemaless:
+                        singer.write_records('exchange_rate', [payload])
+                    else:
+                        singer.write_records('exchange_rate', [parse_response(payload)])
 
             state = {'start_date': next_date}
             next_date = (datetime.strptime(next_date, DATE_FORMAT) + timedelta(days=1)).strftime(DATE_FORMAT)
