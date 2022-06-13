@@ -53,12 +53,13 @@ def giveup(error):
 
 
 @backoff.on_exception(backoff.constant,
-                      (requests.exceptions.RequestException),
+                      requests.exceptions.RequestException,
                       jitter=backoff.random_jitter,
                       max_tries=5,
                       giveup=giveup,
-                      interval=30)
+                      interval=60)
 def request(url, params):
+
     response = requests.get(url=url, params=params)
     response.raise_for_status()
     return response
