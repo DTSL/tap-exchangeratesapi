@@ -11,7 +11,7 @@ import copy
 
 from datetime import datetime, timedelta
 
-base_url = "https://api.apilayer.com/exchangerates_data/{date}"
+base_url = "https://api.exchangerate.host/{date}"
 
 logger = singer.get_logger()
 session = requests.Session()
@@ -19,7 +19,6 @@ session = requests.Session()
 DATE_FORMAT = '%Y-%m-%d'
 
 REQUIRED_CONFIG_KEYS = [
-    "apikey",
     "exchanges",
     "start_date",
     "schemaless"
@@ -59,8 +58,8 @@ def giveup(error):
                       max_tries=5,
                       giveup=giveup,
                       interval=30)
-def request(url, params, headers):
-    response = requests.get(url=url, params=params, headers=headers)
+def request(url, params):
+    response = requests.get(url=url, params=params)
     response.raise_for_status()
     return response
 
@@ -77,15 +76,17 @@ def do_sync(config, start_date):
         while datetime.strptime(next_date, DATE_FORMAT) <= datetime.utcnow():
             for exchange in exchanges:
                 base = exchange["base"]
-                symbols = exchange["symbols"]
+                params = {"base": base}
+                if "symbols" in exchange and exchange["symbols"]:
+                    symbols = exchange["symbols"]
+                    params["symbols"] = symbols
+
                 logger.info('Replicating exchange rate data from %s using base %s',
                             next_date,
                             base)
 
                 response = request(base_url.format(date=next_date),
-                                   {"base": base, "symbols": symbols},
-                                   {"apikey": config["apikey"]})
-
+                                   params)
                 payload = response.json()
 
                 # Update schema if new currency/currencies exist
