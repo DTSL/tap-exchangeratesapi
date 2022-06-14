@@ -123,17 +123,14 @@ def do_sync(config, start_date):
 
 def main():
     args = utils.parse_args(REQUIRED_CONFIG_KEYS)
-    state = {}
+
+    state = args.state or {}
 
     logger.info(f"Sync Starting with exchange rates api.")
-    if args.state:
-        state.update(args.state)
-    else:
-        start_date = state.get('start_date') or args.config['start_date']
-        start_date = singer.utils.strptime_with_tz(start_date).date().strftime(DATE_FORMAT)
-
-        do_sync(args.config, start_date)
-        logger.info("Sync Completed")
+    start_date = state.get('start_date') or args.config['start_date']
+    start_date = singer.utils.strptime_with_tz(start_date).date().strftime(DATE_FORMAT)
+    do_sync(args.config, start_date)
+    logger.info("Sync Completed")
 
 
 if __name__ == '__main__':
