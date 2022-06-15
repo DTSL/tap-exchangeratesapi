@@ -70,7 +70,7 @@ def do_sync(config, start_date):
     schemaless = config["schemaless"]
 
     state = {'start_date': start_date}
-    next_date = start_date
+    next_date = (datetime.strptime(start_date, DATE_FORMAT) + timedelta(days=1)).strftime(DATE_FORMAT)
     prev_schema = {}
 
     try:
